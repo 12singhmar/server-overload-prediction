@@ -1,45 +1,78 @@
-from fastapi import FastAPI, Request
+"""FastAPI service for exploring the server-overload demonstration model.
+
+The model and data in this repository are educational and synthetic.  See the
+README before using the output for any operational decision.
+"""
+
+from pathlib import Path
+from typing import Any
+
+import joblib
+import numpy as np
+import pandas as pd
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import joblib
-import pandas as pd
-import numpy as np
 
-app = FastAPI()
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "server_overload_xgb.pkl"
+FEATURES_PATH = BASE_DIR / "feature_names.pkl"
 
-templates = Jinja2Templates(directory="templates")
+app = FastAPI(title="Server Overload Explorer", version="1.0.0")
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
-model = joblib.load("server_overload_xgb.pkl")
-feature_names = joblib.load("feature_names.pkl")
+model = joblib.load(MODEL_PATH)
+feature_names = list(joblib.load(FEATURES_PATH))
 
-@app.get("/")
-def serve_landing(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get("/dashboard")
-def serve_dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+def score(row: dict[str, Any]) -> dict[str, Any]:
+    """Return the demonstration model score after checking its feature set."""
+    missing = [name for name in feature_names if name not in row]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "Missing model features", "features": missing},
+        )
 
-@app.post("/predict")
-def predict(data: dict):
-    df = pd.DataFrame([data])
-    df = df[feature_names]
-
-    prob = model.predict_proba(df)[0][1]
-    prediction = int(prob >= 0.3)
-
+    frame = pd.DataFrame([row])[feature_names]
+    probability = float(model.predict_proba(frame)[0][1])
     return {
-        "overload_probability": round(float(prob), 4),
-        "early_warning": prediction
+        "overload_probability": round(probability, 4),
+        "early_warning": int(probability >= 0.3),
+        "threshold": 0.3,
+        "notice": "Educational output from a synthetic dataset; not for production monitoring.",
     }
 
+
+@app.get("/")
+def landing(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/dashboard")
+def dashboard(request: Request):
+    return templates.TemplateResponse("dashboard.html", {"request": request})
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "model_features": len(feature_names)}
+
+
+@app.post("/predict")
+def predict(data: dict[str, Any]):
+    return score(data)
+
+
 @app.post("/simulate")
-def simulate(data: dict):
-    cpu = data.get("CPU_Utilization_%", 50)
-    temp = data.get("CPU1_Temp_C", 45)
-    power = data.get("System_Power_W", 250)
-    fan = data.get("Avg_Fan_Speed_RPM", 3500)
-    hour = data.get("hour", 12)
+def simulate(data: dict[str, Any]):
+    """Generate a plausible synthetic snapshot for the dashboard demo."""
+    cpu = float(data.get("CPU_Utilization_%", 50))
+    temp = float(data.get("CPU1_Temp_C", 45))
+    power = float(data.get("System_Power_W", 250))
+    fan = float(data.get("Avg_Fan_Speed_RPM", 3500))
+    hour = int(data.get("hour", 12))
 
     row = {
         "CPU_Utilization_%": cpu,
@@ -57,28 +90,19 @@ def simulate(data: dict):
         "day_of_week": 2,
     }
 
-    for base, val in [("CPU_Utilization_%", cpu), ("CPU1_Temp_C", temp),
-                      ("CPU2_Temp_C", row["CPU2_Temp_C"]),
-                      ("System_Power_W", power), ("Avg_Fan_Speed_RPM", fan)]:
-        noise = [np.random.normal(0, 1) for _ in range(3)]
-        lags = [val * 0.95 + noise[0], val * 0.90 + noise[1], val * 0.85 + noise[2]]
-        for i in range(1, 4):
-            row[f"{base}_lag{i}"] = round(lags[i-1], 4)
-        vals = [val, lags[0], lags[1]]
-        row[f"{base}_roll_mean_3"] = round(float(np.mean(vals)), 4)
-        row[f"{base}_roll_std_3"] = round(float(np.std(vals, ddof=1)) if np.std(vals) > 0 else 0.01, 4)
+    for base, value in [
+        ("CPU_Utilization_%", cpu),
+        ("CPU1_Temp_C", temp),
+        ("CPU2_Temp_C", row["CPU2_Temp_C"]),
+        ("System_Power_W", power),
+        ("Avg_Fan_Speed_RPM", fan),
+    ]:
+        noise = np.random.normal(0, 1, size=3)
+        lags = [value * 0.95 + noise[0], value * 0.90 + noise[1], value * 0.85 + noise[2]]
+        for index, lag in enumerate(lags, start=1):
+            row[f"{base}_lag{index}"] = round(float(lag), 4)
+        rolling_values = [value, lags[0], lags[1]]
+        row[f"{base}_roll_mean_3"] = round(float(np.mean(rolling_values)), 4)
+        row[f"{base}_roll_std_3"] = round(float(np.std(rolling_values, ddof=1)), 4)
 
-    df = pd.DataFrame([row])
-    df = df[feature_names]
-    prob = model.predict_proba(df)[0][1]
-    prediction = int(prob >= 0.3)
-
-    return {
-        "features": row,
-        "overload_probability": round(float(prob), 4),
-        "early_warning": prediction
-    }
-
-import os
-os.makedirs("static", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+    return {"features": row, **score(row)}
