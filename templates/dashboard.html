@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard · Server Overload Explorer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <a class="back" href="/">← Project overview</a>
+      <p class="eyebrow">Interactive demo</p>
+      <h1>Simulate a server snapshot</h1>
+      <p class="lede">Adjust the inputs and generate a synthetic telemetry row. Results are for demonstration only.</p>
+      <section class="card">
+        <form id="simulator">
+          <label>CPU utilization (%)<input name="CPU_Utilization_%" type="number" min="0" max="100" value="50"></label>
+          <label>CPU temperature (°C)<input name="CPU1_Temp_C" type="number" min="0" max="120" value="45"></label>
+          <label>System power (W)<input name="System_Power_W" type="number" min="0" value="250"></label>
+          <label>Fan speed (RPM)<input name="Avg_Fan_Speed_RPM" type="number" min="0" value="3500"></label>
+          <label>Hour (0–23)<input name="hour" type="number" min="0" max="23" value="12"></label>
+          <button class="button primary" type="submit">Run simulation</button>
+        </form>
+      </section>
+      <section class="card result" aria-live="polite">
+        <p class="eyebrow">Result</p>
+        <h2 id="result-title">Waiting for a simulation</h2>
+        <p id="result-copy">Enter a few server conditions, then run the simulation.</p>
+      </section>
+    </main>
+    <script src="/static/dashboard.js"></script>
+  </body>
+</html>
